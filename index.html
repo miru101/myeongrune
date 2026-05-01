@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>명 륜 조 아</title>
+    <style>
+        body { font-family: 'Pretendard', sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
+        .container { max-width: 1300px; margin: auto; background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
+        h2 { text-align: center; margin-bottom: 20px; }
+        
+        .setup-bar { display: flex; gap: 12px; margin-bottom: 30px; justify-content: center; background: #fff; border: 2px solid #dee2e6; padding: 20px; border-radius: 15px; position: sticky; top: 10px; z-index: 100; }
+        input { padding: 12px; border: 2px solid #ddd; border-radius: 8px; width: 250px; font-size: 16px; }
+        
+        /* 버튼 공통 스타일 */
+        .btn { padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 15px; transition: 0.2s; }
+        .save-btn { background-color: #339af0; color: white; }
+        .refresh-btn { background-color: #51cf66; color: white; display: flex; align-items: center; gap: 5px; }
+        .btn:hover { opacity: 0.8; transform: translateY(-1px); }
+        .btn:disabled { background-color: #adb5bd; cursor: not-allowed; }
+
+        .weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 10px; text-align: center; font-weight: bold; }
+        .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
+        .day { border: 1px solid #e9ecef; padding: 10px; min-height: 200px; border-radius: 12px; background: #fff; display: flex; flex-direction: column; }
+        .day.empty { background: none; border: none; }
+        
+        .day-num { font-weight: 800; font-size: 1.2em; margin-bottom: 10px; }
+        .btn-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+        .status-btn { border: 1px solid #ddd; padding: 4px; border-radius: 4px; cursor: pointer; font-size: 0.8em; background: #fff; }
+        .status-btn.ok.active { background: #40c057; color: white; }
+        .status-btn.no.active { background: #fa5252; color: white; }
+        .status-btn.wait.active { background: #adb5bd; color: white; }
+
+        .summary { font-size: 0.75em; border-top: 1px solid #eee; padding-top: 8px; margin-top: auto; }
+        .sum-line b { color: #339af0; }
+        .names-area { font-size: 0.7em; color: #777; margin-top: 5px; height: 40px; overflow-y: auto; }
+
+        .ranking-section { margin-top: 50px; border-top: 2px solid #eee; padding-top: 30px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; font-size: 14px; }
+        th { background: #f8f9fa; }
+        .top-rank { background-color: #fff9db !important; font-weight: bold; }
+        
+        .loading-text { color: #339af0; text-align: center; font-weight: bold; margin-bottom: 10px; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>명 륜 이 하 율 정 선 우 김 하 영 감 사 합 니 다</h2>
+    
+    <div class="setup-bar">
+        <input type="text" id="userName" placeholder="이름을 입력하세요">
+        <button class="btn save-btn" id="saveBtn" onclick="saveData()">내 일정 제출</button>
+        <button class="btn refresh-btn" onclick="loadData()">🔄 새로고침</button>
+    </div>
+
+    <div id="loading" class="loading-text">데이터를 동기화 중입니다...</div>
+
+    <div class="weekdays">
+        <div style="color: #fa5252;">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div style="color: #228be6;">토</div>
+    </div>
+    <div id="calendar" class="calendar"></div>
+
+    <div class="ranking-section">
+        <h3>참여 현황 (정렬:가눙 인원순)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>순위</th>
+                    <th>날짜</th>
+                    <th>가능(명)</th>
+                    <th>불가(명)</th>
+                    <th>가능 멤버</th>
+                    <th>불가능 멤버</th>
+                </tr>
+            </thead>
+            <tbody id="rankTableBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // ⚠️ 배포된 Google Apps Script URL을 여기에 입력하세요!
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyAwgei-VPHCbG7SbdTDGJuViollt9xItkSdAhYh1TUX3sQCDZVKLMoDp2192_IAtZf4A/exec";
+
+    const totalDays = 31;
+    const startDayOfWeek = 5; 
+    
+    let globalVotes = {}; 
+    let myTempSelections = {}; 
+
+    async function init() {
+        renderCalendar();
+        await loadData();
+    }
+
+    function renderCalendar() {
+        const cal = document.getElementById('calendar');
+        cal.innerHTML = "";
+        for (let j = 0; j < startDayOfWeek; j++) {
+            const empty = document.createElement('div');
+            empty.className = 'day empty';
+            cal.appendChild(empty);
+        }
+        for (let i = 1; i <= totalDays; i++) {
+            const d = document.createElement('div');
+            d.className = 'day';
+            d.id = `day-${i}`;
+            updateDayElement(d, i);
+            cal.appendChild(d);
+        }
+    }
+
+    function updateDayElement(el, i) {
+        const stats = getStatsForDay(i);
+        const mySel = myTempSelections[i] || 'wait';
+
+        el.innerHTML = `
+            <div class="day-num">${i}</div>
+            <div class="btn-group">
+                <button class="status-btn ok ${mySel === 'ok' ? 'active' : ''}" onclick="selectStatus(${i}, 'ok')">가능</button>
+                <button class="status-btn no ${mySel === 'no' ? 'active' : ''}" onclick="selectStatus(${i}, 'no')">불가</button>
+                <button class="status-btn wait ${mySel === 'wait' ? 'active' : ''}" onclick="selectStatus(${i}, 'wait')">미정</button>
+            </div>
+            <div class="summary">
+                <div class="sum-line">가능 <b>${stats.ok.length}</b> / 불가 <b>${stats.no.length}</b></div>
+                <div class="names-area" title="가능 멤버"> ${stats.ok.join(', ') || '-'}</div>
+            </div>
+        `;
+    }
+
+    function getStatsForDay(day) {
+        let ok = [], no = [], wait = [];
+        Object.keys(globalVotes).forEach(name => {
+            const status = globalVotes[name][day] || 'wait';
+            if (status === 'ok') ok.push(name);
+            else if (status === 'no') no.push(name);
+            else wait.push(name);
+        });
+        return { ok, no, wait };
+    }
+
+    function selectStatus(day, status) {
+        myTempSelections[day] = status;
+        updateDayElement(document.getElementById(`day-${day}`), day);
+    }
+
+    // 데이터 새로고침/로드
+    async function loadData() {
+        if (SCRIPT_URL.includes("여기에")) return;
+        const loader = document.getElementById('loading');
+        loader.style.display = 'block';
+
+        try {
+            // 캐시 방지를 위해 랜덤 쿼리 추가
+            const response = await fetch(SCRIPT_URL + "?t=" + new Date().getTime());
+            const rawData = await response.json();
+            
+            const newVotes = {};
+            rawData.slice(1).forEach(row => {
+                if (row[1] && row[2]) {
+                    newVotes[row[1]] = JSON.parse(row[2]);
+                }
+            });
+            globalVotes = newVotes;
+            refreshUI();
+        } catch (e) {
+            console.error("데이터 로드 실패", e);
+        } finally {
+            loader.style.display = 'none';
+        }
+    }
+
+    // 저장하기
+    async function saveData() {
+        const name = document.getElementById('userName').value.trim();
+        if (!name) return alert("이름을 입력해 주세요!");
+
+        const btn = document.getElementById('saveBtn');
+        btn.disabled = true;
+        btn.innerText = "제출 중...";
+
+        try {
+            await fetch(SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({ name: name, selections: myTempSelections })
+            });
+            alert("일정이 시트에 기록되었습니다!");
+            await loadData(); // 저장 후 즉시 최신 데이터 다시 불러오기
+        } catch (e) {
+            alert("저장 실패. 구글 앱스 스크립트 설정을 확인하세요.");
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "내 일정 제출";
+        }
+    }
+
+    function refreshUI() {
+        for (let i = 1; i <= totalDays; i++) {
+            const el = document.getElementById(`day-${i}`);
+            if (el) updateDayElement(el, i);
+        }
+        updateRankTable();
+    }
+
+    function updateRankTable() {
+        const tableBody = document.getElementById('rankTableBody');
+        const list = [];
+        for (let i = 1; i <= totalDays; i++) {
+            const s = getStatsForDay(i);
+            list.push({ day: i, ok: s.ok, no: s.no });
+        }
+        list.sort((a, b) => b.ok.length - a.ok.length);
+
+        tableBody.innerHTML = list.map((item, idx) => `
+            <tr class="${idx === 0 ? 'top-rank' : ''}">
+                <td>${idx + 1}</td>
+                <td>${item.day}일</td>
+                <td style="color:#2b8a3e"><b>${item.ok.length}</b></td>
+                <td style="color:#fa5252"><b>${item.no.length}</b></td>
+                <td>${item.ok.join(', ') || '-'}</td>
+                <td style="color:#888;">${item.no.join(', ') || '-'}</td>
+            </tr>
+        `).join('');
+    }
+
+    init();
+</script>
+
+</body>
+</html>
